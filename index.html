@@ -16,6 +16,7 @@
       --soft-white: rgba(255, 255, 255, 0.88);
       --purple-top: #c62bff;
       --purple-bottom: #7b00ff;
+      --purple-soft: rgba(198, 43, 255, 0.18);
       --error: #ff9ca8;
     }
 
@@ -101,13 +102,20 @@
       font-weight: 900;
       line-height: 0.9;
       letter-spacing: -0.07em;
-      margin-bottom: 0.8vh;
+      margin-bottom: 1vh;
       background: linear-gradient(180deg, var(--purple-top) 0%, var(--purple-bottom) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
       filter: drop-shadow(0 6px 18px rgba(123, 0, 255, 0.18));
       transform: translateZ(0);
+    }
+
+    .label-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
     }
 
     .label {
@@ -117,6 +125,32 @@
       font-style: italic;
       line-height: 1;
       letter-spacing: -0.03em;
+    }
+
+    .refresh-indicator {
+      width: clamp(18px, 3.2vh, 28px);
+      height: clamp(18px, 3.2vh, 28px);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.45);
+      opacity: 0.65;
+      transform-origin: center;
+      transition: opacity 0.25s ease, transform 0.25s ease, color 0.25s ease;
+      filter: drop-shadow(0 0 0 rgba(198, 43, 255, 0));
+    }
+
+    .refresh-indicator svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .refresh-indicator.active {
+      color: #d66eff;
+      opacity: 1;
+      animation: spinFlash 0.9s ease;
+      filter: drop-shadow(0 0 10px var(--purple-soft));
     }
 
     .status {
@@ -153,6 +187,21 @@
       }
     }
 
+    @keyframes spinFlash {
+      0% {
+        transform: rotate(0deg) scale(1);
+        opacity: 0.7;
+      }
+      40% {
+        transform: rotate(180deg) scale(1.18);
+        opacity: 1;
+      }
+      100% {
+        transform: rotate(360deg) scale(1);
+        opacity: 1;
+      }
+    }
+
     body.kraken .widget {
       border-radius: 50%;
     }
@@ -172,7 +221,27 @@
 
       <div id="channelName" class="channel-name">Canal no YouTube</div>
       <div id="subscriberCount" class="count">0</div>
-      <div class="label">Inscritos</div>
+
+      <div class="label-row">
+        <div class="label">Inscritos</div>
+        <div id="refreshIndicator" class="refresh-indicator" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path
+              d="M20 12a8 8 0 1 1-2.34-5.66"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+            />
+            <path
+              d="M20 4v6h-6"
+              stroke="currentColor"
+              stroke-width="2.2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+      </div>
 
       <div id="status" class="status">Atualizando...</div>
     </div>
@@ -182,15 +251,17 @@
     const CONFIG = {
       apiKey: "AIzaSyCSh5TbCpER__uLk88p4X3nQJQumlPCSAQ",
       channelId: "UCnL6x8IwCBtIIYLWeLFMvmw",
-      refreshMs: 30000,      // 30 segundos
-      fullResetMs: 300000,   // 5 minutos
-      stepDelayMs: 35        // velocidade da animação de +1 em +1
+      refreshMs: 30000,       // 30 segundos
+      fullResetMs: 300000,    // 5 minutos
+      fullResetDurationMs: 5000, // animação total em 5s
+      updateDurationMs: 1400     // animação curta nas atualizações de 30s
     };
 
     const elAvatar = document.getElementById("channelAvatar");
     const elName = document.getElementById("channelName");
     const elCount = document.getElementById("subscriberCount");
     const elStatus = document.getElementById("status");
+    const elRefresh = document.getElementById("refreshIndicator");
 
     const params = new URLSearchParams(window.location.search);
     if (params.get("kraken") === "1") {
@@ -198,9 +269,7 @@
     }
 
     let currentDisplayedCount = 0;
-    let targetCount = 0;
-    let animationInterval = null;
-    let isAnimating = false;
+    let animationFrameId = null;
     let firstLoad = true;
 
     function formatSubscribers(value) {
@@ -218,51 +287,64 @@
       elCount.classList.add("updating");
     }
 
+    function flashRefreshIcon() {
+      elRefresh.classList.remove("active");
+      void elRefresh.offsetWidth;
+      elRefresh.classList.add("active");
+
+      setTimeout(() => {
+        elRefresh.classList.remove("active");
+      }, 950);
+    }
+
     function renderCount(value) {
       elCount.textContent = formatSubscribers(value);
     }
 
-    function stopCurrentAnimation() {
-      if (animationInterval) {
-        clearInterval(animationInterval);
-        animationInterval = null;
+    function stopAnimation() {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
       }
-      isAnimating = false;
     }
 
-    function animateToValue(from, to, options = {}) {
-      const { resetMode = false } = options;
+    function animateToValue(from, to, durationMs, onComplete) {
+      stopAnimation();
 
-      stopCurrentAnimation();
+      const start = Number(from);
+      const end = Number(to);
 
-      currentDisplayedCount = from;
-      targetCount = to;
-      renderCount(currentDisplayedCount);
-
-      if (from === to) {
-        if (resetMode) {
-          setStatus("Reset completo finalizado");
-        } else {
-          setStatus("Sem mudanças no total");
-        }
+      if (start === end) {
+        currentDisplayedCount = end;
+        renderCount(end);
+        if (onComplete) onComplete();
         return;
       }
 
-      isAnimating = true;
+      const startTime = performance.now();
       animateCountPulse();
 
-      const direction = from < to ? 1 : -1;
+      function frame(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / durationMs, 1);
 
-      animationInterval = setInterval(() => {
-        currentDisplayedCount += direction;
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const currentValue = Math.round(start + (end - start) * eased);
 
-        renderCount(currentDisplayedCount);
+        currentDisplayedCount = currentValue;
+        renderCount(currentValue);
 
-        if (currentDisplayedCount === targetCount) {
-          stopCurrentAnimation();
-          setStatus(resetMode ? "Reset completo finalizado" : "Atualizado agora");
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(frame);
+        } else {
+          currentDisplayedCount = end;
+          renderCount(end);
+          animationFrameId = null;
+          if (onComplete) onComplete();
         }
-      }, CONFIG.stepDelayMs);
+      }
+
+      animationFrameId = requestAnimationFrame(frame);
     }
 
     async function fetchChannelData() {
@@ -300,6 +382,7 @@
     async function updateWidget({ forceReset = false } = {}) {
       try {
         setStatus(forceReset ? "Recarregando completo..." : "Buscando atualização...");
+        flashRefreshIcon();
 
         const channel = await fetchChannelData();
 
@@ -310,7 +393,7 @@
         }
 
         if (channel.hidden) {
-          stopCurrentAnimation();
+          stopAnimation();
           elCount.textContent = "--";
           setStatus("Contagem pública oculta.", true);
           return;
@@ -320,43 +403,45 @@
 
         if (firstLoad) {
           firstLoad = false;
-          animateToValue(0, newCount, { resetMode: true });
+          animateToValue(0, newCount, CONFIG.fullResetDurationMs, () => {
+            setStatus("Atualizado agora");
+          });
           return;
         }
 
         if (forceReset) {
-          animateToValue(0, newCount, { resetMode: true });
+          animateToValue(0, newCount, CONFIG.fullResetDurationMs, () => {
+            setStatus("Reset completo finalizado");
+          });
           return;
         }
 
         if (newCount !== currentDisplayedCount) {
-          animateToValue(currentDisplayedCount, newCount, { resetMode: false });
+          animateToValue(currentDisplayedCount, newCount, CONFIG.updateDurationMs, () => {
+            setStatus("Atualizado agora");
+          });
         } else {
           renderCount(currentDisplayedCount);
-          setStatus("Sem mudanças no total");
+          setStatus("Atualizado agora");
         }
 
       } catch (error) {
         console.error(error);
-        stopCurrentAnimation();
+        stopAnimation();
         elCount.textContent = "Erro";
         setStatus("Não foi possível carregar os inscritos.", true);
       }
     }
 
-    // primeira carga
     updateWidget({ forceReset: true });
 
-    // atualização normal a cada 30 segundos
     setInterval(() => {
       updateWidget({ forceReset: false });
     }, CONFIG.refreshMs);
 
-    // reset visual completo a cada 5 minutos
     setInterval(() => {
       updateWidget({ forceReset: true });
     }, CONFIG.fullResetMs);
   </script>
 </body>
 </html>
-
