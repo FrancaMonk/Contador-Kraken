@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contador YouTube Kraken</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #000000;
+      --white: #ffffff;
+      --soft-white: rgba(255, 255, 255, 0.88);
+      --purple-top: #c62bff;
+      --purple-bottom: #7b00ff;
+      --error: #ff9ca8;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+      font-family: "Inter", Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .widget {
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4vh;
+      position: relative;
+    }
+
+    .content {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      position: relative;
+    }
+
+    .avatar-wrap {
+      width: min(28vh, 170px);
+      height: min(28vh, 170px);
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.95);
+      overflow: hidden;
+      background: #111;
+      margin-bottom: 2.5vh;
+      flex-shrink: 0;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    .avatar {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .channel-name {
+      width: 88%;
+      color: var(--white);
+      font-size: clamp(22px, 4.8vh, 42px);
+      font-weight: 800;
+      font-style: italic;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      margin-bottom: 2.2vh;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+    }
+
+    .count {
+      width: 96%;
+      font-size: clamp(72px, 19vh, 170px);
+      font-weight: 900;
+      line-height: 0.9;
+      letter-spacing: -0.07em;
+      margin-bottom: 0.8vh;
+      background: linear-gradient(180deg, var(--purple-top) 0%, var(--purple-bottom) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      filter: drop-shadow(0 6px 18px rgba(123, 0, 255, 0.18));
+      transform: translateZ(0);
+    }
+
+    .label {
+      color: var(--soft-white);
+      font-size: clamp(28px, 6.5vh, 70px);
+      font-weight: 300;
+      font-style: italic;
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .status {
+      position: absolute;
+      bottom: 1.2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.22);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .error {
+      color: var(--error);
+    }
+
+    .count.updating {
+      animation: pulse 0.45s ease;
+    }
+
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        opacity: 0.92;
+      }
+      40% {
+        transform: scale(1.035);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    body.kraken .widget {
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div class="widget">
+    <div class="content">
+      <div class="avatar-wrap">
+        <img
+          id="channelAvatar"
+          class="avatar"
+          src=""
+          alt="Foto do canal"
+        />
+      </div>
+
+      <div id="channelName" class="channel-name">Canal no YouTube</div>
+      <div id="subscriberCount" class="count">...</div>
+      <div class="label">Inscritos</div>
+
+      <div id="status" class="status">Atualizando...</div>
+    </div>
+  </div>
+
+  <script>
+    const CONFIG = {
+      apiKey: "AIzaSyCSh5TbCpER__uLk88p4X3nQJQumlPCSAQ",
+      channelId: "UCnL6x8IwCBtIIYLWeLFMvmw",
+      refreshMs: 15000
+    };
+
+    const elAvatar = document.getElementById("channelAvatar");
+    const elName = document.getElementById("channelName");
+    const elCount = document.getElementById("subscriberCount");
+    const elStatus = document.getElementById("status");
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("kraken") === "1") {
+      document.body.classList.add("kraken");
+    }
+
+    function formatSubscribers(value) {
+      return Number(value).toLocaleString("pt-BR");
+    }
+
+    function setStatus(text, isError = false) {
+      elStatus.textContent = text;
+      elStatus.classList.toggle("error", isError);
+    }
+
+    function animateCount() {
+      elCount.classList.remove("updating");
+      void elCount.offsetWidth;
+      elCount.classList.add("updating");
+    }
+
+    async function fetchChannelData() {
+      const url =
+        `https://www.googleapis.com/youtube/v3/channels` +
+        `?part=snippet,statistics&id=${CONFIG.channelId}&key=${CONFIG.apiKey}`;
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Erro HTTP ${response.status}: ${text}`);
+      }
+
+      const data = await response.json();
+
+      if (!data.items || !data.items.length) {
+        throw new Error("Canal não encontrado.");
+      }
+
+      const channel = data.items[0];
+
+      return {
+        title: channel.snippet?.title || "Canal no YouTube",
+        avatar:
+          channel.snippet?.thumbnails?.high?.url ||
+          channel.snippet?.thumbnails?.medium?.url ||
+          channel.snippet?.thumbnails?.default?.url ||
+          "",
+        subscribers: channel.statistics?.subscriberCount || "0",
+        hidden: channel.statistics?.hiddenSubscriberCount || false
+      };
+    }
+
+    async function updateWidget() {
+      try {
+        setStatus("Atualizando...");
+
+        const channel = await fetchChannelData();
+
+        elName.textContent = channel.title;
+
+        if (channel.avatar) {
+          elAvatar.src = channel.avatar;
+        }
+
+        if (channel.hidden) {
+          elCount.textContent = "--";
+          setStatus("Contagem pública oculta.", true);
+          return;
+        }
+
+        const formatted = formatSubscribers(channel.subscribers);
+
+        if (elCount.textContent !== formatted) {
+          elCount.textContent = formatted;
+          animateCount();
+        } else {
+          elCount.textContent = formatted;
+        }
+
+        setStatus("Atualizado agora");
+      } catch (error) {
+        console.error(error);
+        elCount.textContent = "Erro";
+        setStatus("Não foi possível carregar os inscritos.", true);
+      }
+    }
+
+    updateWidget();
+    setInterval(updateWidget, CONFIG.refreshMs);
+  </script>
+</body>
+</html>
