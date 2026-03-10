@@ -171,7 +171,7 @@
       </div>
 
       <div id="channelName" class="channel-name">Canal no YouTube</div>
-      <div id="subscriberCount" class="count">...</div>
+      <div id="subscriberCount" class="count">0</div>
       <div class="label">Inscritos</div>
 
       <div id="status" class="status">Atualizando...</div>
@@ -180,9 +180,11 @@
 
   <script>
     const CONFIG = {
-      apiKey: "AIzaSyCSh5TbCpER__uLk88p4X3nQJQumlPCSAQ",
+      apiKey: "SUA_API_KEY_AQUI",
       channelId: "UCnL6x8IwCBtIIYLWeLFMvmw",
-      refreshMs: 15000
+      refreshMs: 30000,      // 30 segundos
+      fullResetMs: 300000,   // 5 minutos
+      stepDelayMs: 35        // velocidade da animação de +1 em +1
     };
 
     const elAvatar = document.getElementById("channelAvatar");
@@ -195,6 +197,12 @@
       document.body.classList.add("kraken");
     }
 
+    let currentDisplayedCount = 0;
+    let targetCount = 0;
+    let animationInterval = null;
+    let isAnimating = false;
+    let firstLoad = true;
+
     function formatSubscribers(value) {
       return Number(value).toLocaleString("pt-BR");
     }
@@ -204,10 +212,57 @@
       elStatus.classList.toggle("error", isError);
     }
 
-    function animateCount() {
+    function animateCountPulse() {
       elCount.classList.remove("updating");
       void elCount.offsetWidth;
       elCount.classList.add("updating");
+    }
+
+    function renderCount(value) {
+      elCount.textContent = formatSubscribers(value);
+    }
+
+    function stopCurrentAnimation() {
+      if (animationInterval) {
+        clearInterval(animationInterval);
+        animationInterval = null;
+      }
+      isAnimating = false;
+    }
+
+    function animateToValue(from, to, options = {}) {
+      const { resetMode = false } = options;
+
+      stopCurrentAnimation();
+
+      currentDisplayedCount = from;
+      targetCount = to;
+      renderCount(currentDisplayedCount);
+
+      if (from === to) {
+        if (resetMode) {
+          setStatus("Reset completo finalizado");
+        } else {
+          setStatus("Sem mudanças no total");
+        }
+        return;
+      }
+
+      isAnimating = true;
+      animateCountPulse();
+
+      const direction = from < to ? 1 : -1;
+
+      animationInterval = setInterval(() => {
+        currentDisplayedCount += direction;
+
+        renderCount(currentDisplayedCount);
+
+        if (currentDisplayedCount === targetCount) {
+          stopCurrentAnimation();
+          setStatus(resetMode ? "Reset completo finalizado" : "Atualizado agora");
+        }
+      }, CONFIG.stepDelayMs);
     }
 
     async function fetchChannelData() {
@@ -237,14 +292,14 @@
           channel.snippet?.thumbnails?.medium?.url ||
           channel.snippet?.thumbnails?.default?.url ||
           "",
-        subscribers: channel.statistics?.subscriberCount || "0",
+        subscribers: Number(channel.statistics?.subscriberCount || 0),
         hidden: channel.statistics?.hiddenSubscriberCount || false
       };
     }
 
-    async function updateWidget() {
+    async function updateWidget({ forceReset = false } = {}) {
       try {
-        setStatus("Atualizando...");
+        setStatus(forceReset ? "Recarregando completo..." : "Buscando atualização...");
 
         const channel = await fetchChannelData();
 
@@ -255,31 +310,52 @@
         }
 
         if (channel.hidden) {
+          stopCurrentAnimation();
           elCount.textContent = "--";
           setStatus("Contagem pública oculta.", true);
           return;
         }
 
-        const formatted = formatSubscribers(channel.subscribers);
+        const newCount = channel.subscribers;
 
-        if (elCount.textContent !== formatted) {
-          elCount.textContent = formatted;
-          animateCount();
-        } else {
-          elCount.textContent = formatted;
+        if (firstLoad) {
+          firstLoad = false;
+          animateToValue(0, newCount, { resetMode: true });
+          return;
         }
 
-        setStatus("Atualizado agora");
+        if (forceReset) {
+          animateToValue(0, newCount, { resetMode: true });
+          return;
+        }
+
+        if (newCount !== currentDisplayedCount) {
+          animateToValue(currentDisplayedCount, newCount, { resetMode: false });
+        } else {
+          renderCount(currentDisplayedCount);
+          setStatus("Sem mudanças no total");
+        }
+
       } catch (error) {
         console.error(error);
+        stopCurrentAnimation();
         elCount.textContent = "Erro";
         setStatus("Não foi possível carregar os inscritos.", true);
       }
     }
 
-    updateWidget();
-    setInterval(updateWidget, CONFIG.refreshMs);
+    // primeira carga
+    updateWidget({ forceReset: true });
+
+    // atualização normal a cada 30 segundos
+    setInterval(() => {
+      updateWidget({ forceReset: false });
+    }, CONFIG.refreshMs);
+
+    // reset visual completo a cada 5 minutos
+    setInterval(() => {
+      updateWidget({ forceReset: true });
+    }, CONFIG.fullResetMs);
   </script>
 </body>
-
 </html>
